@@ -1,0 +1,66 @@
+name:                check-obelisk
+version:             0.1.0.0
+github:              "dmp1ce/check_obelisk"
+license:             PublicDomain
+author:              "David Parrish"
+maintainer:          "daveparrish@tutanota.com"
+
+extra-source-files:
+- README.md
+- ChangeLog.md
+
+# Metadata used when publishing your package
+synopsis:            Monitoring plugin for Obelisk devices
+category:            Monitoring
+
+# To avoid duplicated efforts in documentation and dealing with the
+# complications of embedding Haddock markup inside cabal files, it is
+# common to point users to the README.md file.
+description:         Please see the README on GitHub at <https://github.com/dmp1ce/check_obelisk#readme>
+
+dependencies:
+- base >= 4.7 && < 5
+- wreq
+- aeson
+- text
+- bytestring
+- lens
+- lens-aeson
+- scientific
+- optparse-applicative
+- nagios-check
+
+default-extensions:
+  - OverloadedStrings
+  - DeriveGeneric
+
+library:
+  source-dirs: src
+  ghc-options: -Wall -Werror -O2
+
+executables:
+  check_obelisk:
+    main:                Main.hs
+    source-dirs:         app
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    dependencies:
+    - check-obelisk
+
+tests:
+  check-obelisk-test:
+    main:                Spec.hs
+    source-dirs:         test
+    ghc-options:
+    - -Wall
+    - -Werror
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    dependencies:
+    - check-obelisk
+    - bytestring
+    - tasty
+    - tasty-hunit
