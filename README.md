@@ -1,5 +1,7 @@
 # check_obelisk
 
+[![CircleCI](https://circleci.com/gh/dmp1ce/check_obelisk.svg?style=svg)](https://circleci.com/gh/dmp1ce/check_obelisk)
+
 Monitoring (Nagios) plugin for checking Obelisk miner temperatures from the Obelisk API.
 
 ## Help
