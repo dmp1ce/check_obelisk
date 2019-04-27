@@ -6,8 +6,11 @@ Nagios monitoring plugin for Obelisk miner API
 
 module CheckObelisk where
 
+import Control.Exception.Base (try, IOException)
 import Network.Wreq (responseBody, responseStatus, statusCode)
 import qualified Network.Wreq.Session as S
+import Network.Socket ( getAddrInfo, defaultHints, getNameInfo, addrAddress
+                      , NameInfoFlag (NI_NUMERICHOST, NI_NUMERICSERV), AddrInfo)
 import GHC.Generics (Generic)
 import Data.Aeson ( ToJSON(toEncoding), FromJSON, genericToEncoding, defaultOptions, encode
                   , Value(Number,String)
@@ -17,7 +20,7 @@ import Options.Applicative
   , value, help, str, auto, showDefault, infoOption)
 import qualified Data.Text as T
 import qualified Data.ByteString as B
-import qualified Data.ByteString.Lazy as LB
+import qualified Data.ByteString.Lazy as BL
 import Control.Lens ((^?))
 import Data.Aeson.Lens (key, nth)
 import Text.Read (readEither)
@@ -27,6 +30,7 @@ import Data.Version (showVersion)
 import System.Nagios.Plugin ( NagiosPlugin, runNagiosPlugin, addResult
                             , CheckStatus (Unknown, Warning, Critical, OK)
                             , addPerfDatum, PerfValue (RealValue), UOM (NullUnit) )
+
 
 data LoginRequest = LoginRequest {
       username :: T.Text
@@ -110,7 +114,7 @@ cliOptions = CliOptions
      <> showDefault
       )
 
-getExhaustTemp :: LB.ByteString -> Maybe Rational
+getExhaustTemp :: BL.ByteString -> Maybe Rational
 getExhaustTemp t = expectRational <$> t ^? key "hashboardStatus" . nth 0 . key "exhaustTemp"
 
 -- We really want a rational from the data so make it happen here.
@@ -169,25 +173,36 @@ checkStats (Stats temp) (Thresholds tw tc) = do
                               (Just $ RealValue $ fromRational w) (Just $ RealValue $ fromRational c)
 
 execCheck :: CliOptions -> IO ()
-execCheck (CliOptions h p user pass tw tc) =  do
+execCheck (CliOptions h p user pass tw tc) = do
   sess <- S.newSession
 
+  -- Resolve IP address for Obelisk because some checks were failing from LXD containers
+  -- when using hostname instead of IP address.
+  addrs <- try (getAddrInfo (Just defaultHints) (Just h) (Just "http")) :: IO (Either IOException [AddrInfo])
+
+  (Just host_ip, _) <- case addrs of
+    Right (addr:_) -> getNameInfo [NI_NUMERICHOST, NI_NUMERICSERV] True True $ addrAddress addr
+    Right ([]) -> do runNagiosPlugin $ addResult Unknown $ "Could not get ip address for '" <> T.pack h <> "'"
+                     undefined
+    Left _ -> do runNagiosPlugin $ addResult Unknown $ "Could not get ip address for hostname '" <> T.pack h <> "'"
+                 undefined
+
   -- Login
-  login_request <- S.post sess (url h p "/api/login") $ encode $ LoginRequest (T.pack user) (T.pack pass)
+  login_request <- S.post sess (url host_ip p "/api/login") $ encode $ LoginRequest (T.pack user) (T.pack pass)
 
   case login_request ^? responseStatus . statusCode of
     (Just 200) -> return ()
     _ -> runNagiosPlugin $ addResult Unknown "Could not parse dashboard response."
 
   -- Get Dashboard
-  dashboard_request <- S.get sess $ url h p "/api/status/dashboard"
+  dashboard_request <- S.get sess $ url host_ip p "/api/status/dashboard"
 
   -- Check to see if stats are over threshold
   case getExhaustTemp <$> dashboard_request ^? responseBody of
-    Just (Just temp) ->runNagiosPlugin $ checkStats (Stats temp) (Thresholds (toRational tw) (toRational tc))
+    Just (Just temp) -> runNagiosPlugin $ checkStats (Stats temp) (Thresholds (toRational tw) (toRational tc))
     _ -> runNagiosPlugin $ addResult Unknown "Could not parse dashboard response."
 
   -- Logout
-  _ <- S.post sess (url h p "/api/logout") (""::B.ByteString)
+  _ <- S.post sess (url host_ip p "/api/logout") (""::B.ByteString)
   return ()
   where url h' p' r = "http://" ++ h' ++ ":" ++ p' ++ r

@@ -1,5 +1,5 @@
 name:                check-obelisk
-version:             0.1.0.0
+version:             0.1.1.0
 github:              "dmp1ce/check_obelisk"
 license:             PublicDomain
 author:              "David Parrish"
@@ -29,6 +29,7 @@ dependencies:
 - scientific
 - optparse-applicative
 - nagios-check
+- network
 
 default-extensions:
   - OverloadedStrings
