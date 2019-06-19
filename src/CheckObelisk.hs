@@ -21,8 +21,8 @@ import Options.Applicative
 import qualified Data.Text as T
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Lazy as BL
-import Control.Lens ((^?))
-import Data.Aeson.Lens (key, nth)
+import Control.Lens ((^?), (^..))
+import Data.Aeson.Lens (key, values)
 import Text.Read (readEither)
 import Data.Scientific (Scientific)
 import Paths_check_obelisk (version)
@@ -114,8 +114,10 @@ cliOptions = CliOptions
      <> showDefault
       )
 
-getExhaustTemp :: BL.ByteString -> Maybe Rational
-getExhaustTemp t = expectRational <$> t ^? key "hashboardStatus" . nth 0 . key "exhaustTemp"
+getExhaustTemp :: BL.ByteString -> [Rational]
+getExhaustTemp t =
+  maybe [] (\dsv -> expectRational <$> dsv ^.. values . key "exhaustTemp") $ t ^?
+  (key "hashboardStatus")
 
 -- We really want a rational from the data so make it happen here.
 expectRational :: Value -> Rational
@@ -148,26 +150,29 @@ maximumTempThreshold = 120
 minimumTempThreshold :: Double
 minimumTempThreshold = 20
 
-data Stats = Stats Rational
+data Stats = Stats [Rational]
 data Thresholds = Thresholds Rational Rational
 
 checkStats :: Stats -> Thresholds -> NagiosPlugin ()
 checkStats (Stats temp) (Thresholds tw tc) = do
-  if temp >= tw
+  if any (tw <=) temp
   then addResult Warning ("Temperature over warning threshold of " <> (T.pack . show) (toDouble tw) <> " C" )
   else return ()
-  if temp >= tc
+  if any (tc <=) temp
   then addResult Critical ("Temperature over critical threshold of " <> (T.pack . show) (toDouble tc) <> " C" )
   else return ()
 
-  addResult OK $ "Temperature: " <> (T.pack . show) (toDouble temp) <> " C"
+  addResult OK $ "Max temp: " <> (T.pack . show) (toDouble $ maximum temp) <> " C"
 
   addTempData "exhaustTemp" temp
   where
     toDouble :: Rational -> Double
     toDouble = fromRational
-    addTempData :: T.Text -> Rational -> NagiosPlugin ()
-    addTempData s t = addPerfData s t minimumTempThreshold maximumTempThreshold tw tc
+    addTempData :: T.Text -> [Rational] -> NagiosPlugin ()
+    addTempData s ts = let indexTemps = zip [(s <> (T.pack . show) i) | i <- [1..(length ts)]] ts
+                       in mapM_ (\(s', t) -> addTempData' s' t) indexTemps
+
+    addTempData' s t = addPerfData s t minimumTempThreshold maximumTempThreshold tw tc
     addPerfData s t mint maxt w c = addPerfDatum s (RealValue $ fromRational t) NullUnit
                               (Just $ RealValue mint) (Just $ RealValue maxt)
                               (Just $ RealValue $ fromRational w) (Just $ RealValue $ fromRational c)
@@ -199,7 +204,7 @@ execCheck (CliOptions h p user pass tw tc) = do
 
   -- Check to see if stats are over threshold
   case getExhaustTemp <$> dashboard_request ^? responseBody of
-    Just (Just temp) -> runNagiosPlugin $ checkStats (Stats temp) (Thresholds (toRational tw) (toRational tc))
+    Just (temp) -> runNagiosPlugin $ checkStats (Stats temp) (Thresholds (toRational tw) (toRational tc))
     _ -> runNagiosPlugin $ addResult Unknown "Could not parse dashboard response."
 
   -- Logout
