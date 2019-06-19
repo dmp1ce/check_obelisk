@@ -6,6 +6,7 @@ Nagios monitoring plugin for Obelisk miner API
 
 module CheckObelisk where
 
+import Control.Monad (when)
 import Control.Exception.Base (try, IOException)
 import Network.Wreq (responseBody, responseStatus, statusCode)
 import qualified Network.Wreq.Session as S
@@ -117,7 +118,7 @@ cliOptions = CliOptions
 getExhaustTemp :: BL.ByteString -> [Rational]
 getExhaustTemp t =
   maybe [] (\dsv -> expectRational <$> dsv ^.. values . key "exhaustTemp") $ t ^?
-  (key "hashboardStatus")
+  key "hashboardStatus"
 
 -- We really want a rational from the data so make it happen here.
 expectRational :: Value -> Rational
@@ -150,17 +151,16 @@ maximumTempThreshold = 120
 minimumTempThreshold :: Double
 minimumTempThreshold = 20
 
-data Stats = Stats [Rational]
+newtype Stats = Stats [Rational]
 data Thresholds = Thresholds Rational Rational
 
 checkStats :: Stats -> Thresholds -> NagiosPlugin ()
 checkStats (Stats temp) (Thresholds tw tc) = do
-  if any (tw <=) temp
-  then addResult Warning ("Temperature over warning threshold of " <> (T.pack . show) (toDouble tw) <> " C" )
-  else return ()
-  if any (tc <=) temp
-  then addResult Critical ("Temperature over critical threshold of " <> (T.pack . show) (toDouble tc) <> " C" )
-  else return ()
+  when (any (tw <=) temp) $
+    addResult Warning ("Temperature over warning threshold of " <> (T.pack . show) (toDouble tw) <> " C" )
+
+  when (any (tc <=) temp) $
+    addResult Critical ("Temperature over critical threshold of " <> (T.pack . show) (toDouble tc) <> " C" )
 
   addResult OK $ "Max temp: " <> (T.pack . show) (toDouble $ maximum temp) <> " C"
 
@@ -169,8 +169,8 @@ checkStats (Stats temp) (Thresholds tw tc) = do
     toDouble :: Rational -> Double
     toDouble = fromRational
     addTempData :: T.Text -> [Rational] -> NagiosPlugin ()
-    addTempData s ts = let indexTemps = zip [(s <> (T.pack . show) i) | i <- [1..(length ts)]] ts
-                       in mapM_ (\(s', t) -> addTempData' s' t) indexTemps
+    addTempData s ts = let indexTemps = zip [s <> (T.pack . show) i | i <- [1..(length ts)]] ts
+                       in mapM_ (uncurry addTempData') indexTemps
 
     addTempData' s t = addPerfData s t minimumTempThreshold maximumTempThreshold tw tc
     addPerfData s t mint maxt w c = addPerfDatum s (RealValue $ fromRational t) NullUnit
@@ -187,7 +187,7 @@ execCheck (CliOptions h p user pass tw tc) = do
 
   (Just host_ip, _) <- case addrs of
     Right (addr:_) -> getNameInfo [NI_NUMERICHOST, NI_NUMERICSERV] True True $ addrAddress addr
-    Right ([]) -> do runNagiosPlugin $ addResult Unknown $ "Could not get ip address for '" <> T.pack h <> "'"
+    (Right []) -> do runNagiosPlugin $ addResult Unknown $ "Could not get ip address for '" <> T.pack h <> "'"
                      undefined
     Left _ -> do runNagiosPlugin $ addResult Unknown $ "Could not get ip address for hostname '" <> T.pack h <> "'"
                  undefined
@@ -204,7 +204,7 @@ execCheck (CliOptions h p user pass tw tc) = do
 
   -- Check to see if stats are over threshold
   case getExhaustTemp <$> dashboard_request ^? responseBody of
-    Just (temp) -> runNagiosPlugin $ checkStats (Stats temp) (Thresholds (toRational tw) (toRational tc))
+    Just temp -> runNagiosPlugin $ checkStats (Stats temp) (Thresholds (toRational tw) (toRational tc))
     _ -> runNagiosPlugin $ addResult Unknown "Could not parse dashboard response."
 
   -- Logout
