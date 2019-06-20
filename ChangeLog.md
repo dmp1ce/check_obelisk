@@ -1,8 +1,9 @@
 # Changelog for check_obelisk
 
-## 0.1.2.0
+## 0.2.0.0
 
 - Add support for checking multiple boards for temperature
+- Add hashrate checks and performance data
 
 ## 0.1.1.0
 

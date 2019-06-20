@@ -13,6 +13,8 @@ json :: TestTree
 json = testGroup "json tests"
   [ testCase "get temperature from example dashboard response body" $
     getExhaustTemp dashboardExample @?= [65.8 :: Rational, 63.8]
+  , testCase "get hashrate from example dashboard response body" $
+    getHashRate dashboardExample @?= [514.4 :: Rational, 538.4]
   ]
 
 dashboardExample :: LB.ByteString
